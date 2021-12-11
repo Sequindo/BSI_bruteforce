@@ -4,58 +4,69 @@
 #include <random>
 
 #define BLOCK_SIZE 32
+#define MESSAGE_SIZE 1024
 #define HIDDEN_MESSAGE "ODGADNIJ MNIE UKRYTA WIADOMOSC"
 
 std::mutex mutx;
-std::random_device rd;
-std::mt19937 mt(rd());
-std::uniform_int_distribution<> dist(0, 255);
-char password[8]{0};
-CryptoPP::byte plaintext[] = {218, 15, 32, 166, 4, 32, 217, 165, 210, 229, 32, 133, 32, 207, 182, 255, 190, 32, 205, 161, 32, 3, 201, 245, 214, 137, 215, 154, 32, 168, 235};
+CryptoPP::byte* textBlock;
+
+char password[8]{ 'p', 'a', 's', 's', 'p', 'a', 's', 's' };
 bool success = false;
+bool generatedAll = false;
 
-char* DES_Process(const char* keyString, const CryptoPP::byte* block, size_t length, CryptoPP::CipherDir direction){
+void DES_Process(const char* keyString, const CryptoPP::byte* inputBlock, CryptoPP::byte* outputBlock, size_t length, CryptoPP::CipherDir direction){
     using namespace CryptoPP;
-    byte key[DES_EDE2::KEYLENGTH];
-    memcpy(key, keyString, DES_EDE2::KEYLENGTH);
-
-    byte modifiedText[sizeof(block)];
-    memcpy(modifiedText, block, sizeof(block));
+    byte key[DES::KEYLENGTH];
+    memcpy(key, keyString, DES::KEYLENGTH);
 
     std::unique_ptr<BlockTransformation> t;
     if(direction == ENCRYPTION)
-        t = std::make_unique<DES_EDE2_Encryption>(key, DES_EDE2::KEYLENGTH);
+        t = std::make_unique<DESEncryption>(key, DES::KEYLENGTH);
     else
-        t = std::make_unique<DES_EDE2_Decryption>(key, DES_EDE2::KEYLENGTH);
+        t = std::make_unique<DESDecryption>(key, DES::KEYLENGTH);
+
+    memcpy(outputBlock, inputBlock, MESSAGE_SIZE);
 
     int steps = length / t->BlockSize();
     for(int i=0; i<steps; i++){
         int offset = i * t->BlockSize();
-        t->ProcessBlock(modifiedText + offset);
+        t->ProcessBlock(outputBlock + offset);
     }
-
-    char* textToReturn = new char(sizeof(modifiedText));
-    memcpy(textToReturn, modifiedText, sizeof(block));
-
-    return textToReturn;
 }
 
-void generateRandomPassword()
+void incrementPassword()
 {
-    for(int i=0;i<7;i++)
+    for(int i=0;i<CryptoPP::DES::KEYLENGTH;i++)
     {
-        password[i] = static_cast<char>(dist(mt));
+        std::cout << static_cast<int>(password[i]) << " ";
+    }
+    std::cout << std::endl;
+    int i  = CryptoPP::DES::KEYLENGTH-1;
+    while(password[i]==CHAR_MAX && i>=0)
+    {
+        password[i] = CHAR_MIN;
+        i--;
+    }
+    if(i==0 && password[i]==CHAR_MAX)
+    {
+        generatedAll = true;
+        return;
+    }
+    else
+    {
+        password[i] = password[i]+1;
+        return;
     }
 }
 
 void thread_function()
 {
     mutx.lock();
-    generateRandomPassword();
+    incrementPassword();
     mutx.unlock();
-    auto candidate = DES_Process(password, plaintext, BLOCK_SIZE, CryptoPP::DECRYPTION);
-    std::cout << "Candidate :" << candidate << std::endl;
-    if(strcmp(candidate, HIDDEN_MESSAGE)==0)
+    auto candidate = new CryptoPP::byte[MESSAGE_SIZE];
+    DES_Process(password, textBlock, candidate, BLOCK_SIZE, CryptoPP::DECRYPTION);
+    if(strcmp(reinterpret_cast<const char*>(candidate), HIDDEN_MESSAGE)==0)
     {
         mutx.lock();
         success = true;
@@ -68,11 +79,17 @@ void thread_function()
 std::vector<std::thread> threadPool;
 int main(int argc, char *argv[])
 {
+    textBlock = new CryptoPP::byte[MESSAGE_SIZE];
+    memcpy(textBlock, HIDDEN_MESSAGE, MESSAGE_SIZE);
+    DES_Process(password, textBlock, textBlock, BLOCK_SIZE, CryptoPP::ENCRYPTION);
+    for(int i=0;i<CryptoPP::DES::KEYLENGTH;i++)
+        password[i] = CHAR_MIN;
     int i = 0;
-    while(!success)
+    while(!success || !generatedAll)
     {
         threadPool.push_back(std::thread(&thread_function));
         threadPool.at(i++).join();
     }
+    delete[] textBlock;
     return 0;
 }
