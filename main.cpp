@@ -10,7 +10,7 @@
 std::mutex mutx;
 CryptoPP::byte* textBlock;
 
-char password[8]{ 'p', 'a', 's', 's', 'p', 'a', 's', 's' };
+char password[8]{ CHAR_MIN, CHAR_MIN, CHAR_MIN, CHAR_MIN, CHAR_MIN, CHAR_MIN, 2, 0 };
 bool success = false;
 bool generatedAll = false;
 
@@ -85,7 +85,7 @@ int main(int argc, char *argv[])
     for(int i=0;i<CryptoPP::DES::KEYLENGTH;i++)
         password[i] = CHAR_MIN;
     int i = 0;
-    while(!success || !generatedAll)
+    while(!success && !generatedAll)
     {
         threadPool.push_back(std::thread(&thread_function));
         threadPool.at(i++).join();
